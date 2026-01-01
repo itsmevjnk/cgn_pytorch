@@ -65,10 +65,12 @@ def cgn_infer(cgn, pcd, obj_mask=None, threshold=0.5):
     #idx = torch.linspace(0, pcd.shape[0]-1, 2048).to(dtype=torch.int64).to(cgn.device)
     
     if obj_mask is not None:
-        obj_mask = torch.Tensor(obj_mask[downsample])
+        # Keep mask on the same device as `idx` to avoid device-mismatch indexing errors
+        obj_mask = torch.as_tensor(obj_mask[downsample], dtype=torch.float32, device=cgn.device)
+        idx = idx.to(cgn.device)
         obj_mask = obj_mask[idx]
     else:
-        obj_mask = torch.ones(idx.shape[0])
+        obj_mask = torch.ones(idx.shape[0], device=cgn.device)
 
     points, pred_grasps, confidence, pred_widths, _, pred_collide = cgn(pcd[:, 3:], pos=pcd[:, :3], batch=batch, idx=idx)
     sig = torch.nn.Sigmoid()
@@ -108,7 +110,21 @@ def get_key_points(poses, include_sym=False):
     
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--viz', type=bool, default=True, help='whether or not to debug visualize in meshcat')
+    def _str2bool(v):
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return True
+        s = str(v).strip().lower()
+        if s in ('1', 'true', 't', 'yes', 'y', 'on'):
+            return True
+        if s in ('0', 'false', 'f', 'no', 'n', 'off'):
+            return False
+        raise argparse.ArgumentTypeError(f'--viz expects a boolean, got {v!r}')
+
+    # Supports: --viz, --viz True/False (note: plain `type=bool` treats "False" as True)
+    parser.add_argument('--viz', nargs='?', const=True, default=True, type=_str2bool,
+                        help='whether or not to debug visualize in meshcat')
     parser.add_argument('--load_path', type=str, default='cgn_pytorch/checkpoints/current.pth', help='path to load model from')
     parser.add_argument('--config_path', type=str, default='cgn_pytorch/checkpoints', help='path to config yaml file')
     parser.add_argument('--model', type=str, default='sg_score')
@@ -133,4 +149,5 @@ if __name__=='__main__':
     print('model pass.', pred_grasps.shape[0], 'grasps found.')
     
     ### Visualize
-    visualize(pointcloud, pred_grasps)
+    if args.viz:
+        visualize(pointcloud, pred_grasps)
