@@ -4,13 +4,15 @@ import meshcat.geometry as g
 import numpy as np
 import os
 import argparse
+import trimesh
 from trimesh import exchange, Scene
-from trimesh.points import concatenate, apply_transform, scale_matrix
 from importlib.resources import files
-from mbodios.geometry.array import array
-from mbodios.types.ndarray import N, sz,Float
 
-def scale_matrix(factor:float|array[sz[3],Float], origin:array[sz[3],Float]|None=None):
+# NOTE:
+# This module is imported by the core model code. Keep imports lightweight and
+# compatible across trimesh versions (APIs in trimesh.points changed over time).
+
+def scale_matrix(factor: float | np.ndarray, origin: np.ndarray | None = None):
     """Return matrix to scale by factor around origin in direction.
     Use factor -1 for point symmetry.
     """
@@ -28,19 +30,34 @@ def scale_matrix(factor:float|array[sz[3],Float], origin:array[sz[3],Float]|None
         M[:3, 3] *= 1.0 - factor
     return M
 @overload
-def meshcat_pcd_show(mc_vis, point_cloud:array[N,sz[3],Float],color:array[sz[3],N,Float]|None=None, name:str|None=None, size:float=0.001):...
+def meshcat_pcd_show(mc_vis, point_cloud: np.ndarray, color: np.ndarray | None = None, name: str | None = None, size: float = 0.001): ...
 @overload
-def meshcat_pcd_show(mc_vis, point_cloud:array[sz[3],N,Float],color:array[sz[3],N,Float]|None=None, name:str|None=None, size:float=0.001):...
-def meshcat_pcd_show(mc_vis, point_cloud:array[N,sz[3],Float] | array[sz[3],N,Float], color:array[sz[3],N,Float]|array[sz[3],Float]|None=None, name:str|None=None, size:float=0.001):
+def meshcat_pcd_show(mc_vis, point_cloud: np.ndarray, color: np.ndarray | None = None, name: str | None = None, size: float = 0.001): ...
+def meshcat_pcd_show(mc_vis, point_cloud: np.ndarray, color: np.ndarray | None = None, name: str | None = None, size: float = 0.001):
     """
     Function to show a point cloud using meshcat. 
     mc_vis (meshcat.Visualizer): Interface to the visualizer 
     point_cloud (np.ndarray): Shape Nx3 or 3xN
     color (np.ndarray or list): Shape (3,)
     """
+    # Accept torch tensors and other array-likes (numpy.matrix, lists, etc.)
+    try:
+        import torch  # optional
+        if isinstance(point_cloud, torch.Tensor):
+            point_cloud = point_cloud.detach().cpu().numpy()
+        if isinstance(color, torch.Tensor):
+            color = color.detach().cpu().numpy()
+    except Exception:
+        pass
+
+    point_cloud = np.asarray(point_cloud)
+    if color is not None:
+        color = np.asarray(color)
+
     if point_cloud.shape[0] != 3:
-        point_cloud = cast(array[sz[3],N,Float], point_cloud)
-        point_cloud = point_cloud.transpose(axes=(1,0))
+        point_cloud = cast(np.ndarray, point_cloud)
+        # Use `.T` for compatibility with numpy.matrix and other transpose implementations
+        point_cloud = point_cloud.T
     if color is None:
         color_pts = np.zeros_like(point_cloud) * 255
     else:
@@ -74,12 +91,12 @@ def show_mesh(vis, paths, poses, scales, names, clear=False,  opacity=1.0, color
             meshes = []
             for geometry in trimesh_mesh.geometry:
                 meshes.append(trimesh_mesh.geometry[geometry])
-            trimesh_mesh = concatenate(meshes)
+            trimesh_mesh = trimesh.util.concatenate(meshes)
         scale_tf = scale_matrix(scale)
-        trimesh_mesh = apply_transform(scale_tf)
+        trimesh_mesh = trimesh_mesh.apply_transform(scale_tf)
         trimesh_mesh.vertices -= np.mean(trimesh_mesh.vertices, 0)
         
-        trimesh_mesh = apply_transform(pose)
+        trimesh_mesh = trimesh_mesh.apply_transform(pose)
 
         verts = trimesh_mesh.vertices
         faces = trimesh_mesh.faces
@@ -90,7 +107,7 @@ def show_mesh(vis, paths, poses, scales, names, clear=False,  opacity=1.0, color
     return vis
 
     
-def sample_grasp_show(mc_vis, control_pt_list:array[N,sz[3],Float] | array[sz[3],N,Float], name=None, freq=100):
+def sample_grasp_show(mc_vis, control_pt_list: np.ndarray, name=None, freq=100):
     """
     shows a sample grasp as represented by a little fork guy
     freq: show one grasp per every (freq) grasps (1/freq is ratio of visualized grasps)
@@ -104,7 +121,7 @@ def sample_grasp_show(mc_vis, control_pt_list:array[N,sz[3],Float] | array[sz[3]
         
         gripper = gripper[1:,:]
         gripper = gripper[[2, 0, 1, 3], :]
-        gripper = gripper.transpose(axes=(1,0))
+        gripper = np.asarray(gripper).T
         
         name_i = 'pose'+str(i)
         if i%freq == 0:
