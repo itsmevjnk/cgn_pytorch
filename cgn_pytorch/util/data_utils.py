@@ -8,7 +8,7 @@ import copy
 import torch
 from scipy import spatial
 
-from mbodios.types.sense.image import Image
+from PIL import Image
 
 def get_obj_surrounding(pcd, obj_mask, radius):
     '''
@@ -383,9 +383,11 @@ def load_graspnet_data(rgb_image_path):
     :returns: (depth, rgb, segmap, K)
     """
     
-    depth = Image.open(rgb_image_path).array/1000. # m to mm
-    segmap = Image.open(rgb_image_path.replace('depth', 'label')))
-    rgb = Image.open(rgb_image_path.replace('depth', 'rgb')))
+    # GraspNet depth is typically stored in millimeters as a 16-bit PNG.
+    # Convert to meters for downstream geometry.
+    depth = np.array(Image.open(rgb_image_path), dtype=np.float32) / 1000.0
+    segmap = np.array(Image.open(rgb_image_path.replace('depth', 'label')))
+    rgb = np.array(Image.open(rgb_image_path.replace('depth', 'rgb')))
 
     # graspnet images are upside down, rotate for inference
     # careful: rotate grasp poses back for evaluation
